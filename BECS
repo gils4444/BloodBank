@@ -1,0 +1,1129 @@
+
+import csv
+import tkinter as tk
+import pyodbc
+import datetime
+
+count = 0
+user_id = 0
+currentUser = None
+blood_dict = {'O+': 32, 'A+': 34, 'B+': 17, 'AB+': 7, 'O-': 3, 'A-': 4, 'B-': 2, 'AB-': 1}
+# conn is the connection to the DB
+
+# notice i have deleted the server and database 
+
+conn = pyodbc.connect("DRIVER={SQL Server Native Client 11.0};"
+                      "Server=;"
+                      "Database=;"
+                      "Trusted_Connection=yes;")
+
+cursor = conn.cursor()
+try:
+    cursor.execute("select count(*) from BECS.dbo.Bank_Users ")
+    for row in cursor:
+        user_id = row[0]
+
+    print('user_id', user_id)
+    cursor.execute("select count(*) from BECS.dbo.Blood_Unit ")
+    for row in cursor:
+        count = row[0]
+
+    print('count', count)
+except Exception as e:
+    print(e)
+
+
+def writeLog(msg, msg1=None):
+    """
+    This Func write any thing that happen in the bank, any blood unit that take or expired any login\logout of user to
+    the system this func write to the log file
+    :param msg:string, tells where to do in the "ifs"
+    :param msg1:string,by default is None can used as a message to pass
+    """
+    global currentUser
+    if msg == 'user enter':
+        msg = 'The user ' + currentUser[1] + ' ' + currentUser[2] + ' with id: ' + str(
+            currentUser[0]) + ', the user type is: ' + currentUser[4] + ' entered to the system\n'
+    elif msg == 'user logout':
+        msg = 'The user ' + currentUser[1] + ' ' + currentUser[2] + ' with id: ' + currentUser[
+            0] + ' making a log out now ' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    elif msg == 'blood unit expired':
+        msg = msg1
+    else:
+        msg += ' at the time: ' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' by user ' + currentUser[
+            1] + ' ' + currentUser[2] + ' with id ' + currentUser[0] + '\n'
+    with open('LogFile', 'a') as the_file:
+        the_file.write(msg)
+
+
+def back(controller):
+    """
+    this func eturn to the entrance page of any user type
+    :param controller: tk.Frame object
+    :return:
+    """
+    global currentUser
+    userType = currentUser[4]
+    if userType == 'Admin':
+        controller.show_frame(AdminPage)
+    if userType == 'Employ':
+        controller.show_frame(EmployPage)
+    if userType == 'Research student':
+        controller.show_frame(Research_StudentPage)
+
+
+def backToHomeAndLogOut(controller):
+    """
+    this func makes a logout to the user and return to the entrance page
+    :param controller: tk.Frame object
+    """
+    print('back To Home And LogOut')
+    global currentUser
+    writeLog('user logout')
+    currentUser = None
+    controller.show_frame(EntryPage)
+
+
+def buildDB():
+    """
+    this func build a default DB of blood unit
+    """
+    global count
+    for i in range(1, 33):
+        count = i
+        insertNewUnitToDB(conn, count, count, count, 'O+')
+        readFromDB(conn)
+    for i in range(1, 35):
+        count = i + 32
+        insertNewUnitToDB(conn, count, count, count, 'A+')
+        readFromDB(conn)
+    for i in range(1, 18):
+        count = i + 66
+        insertNewUnitToDB(conn, count, count, count, 'B+')
+        readFromDB(conn)
+    for i in range(1, 8):
+        count = i + 83
+        insertNewUnitToDB(conn, count, count, count, 'AB+')
+        readFromDB(conn)
+    for i in range(1, 4):
+        count = i + 90
+        insertNewUnitToDB(conn, count, count, count, 'O-')
+        readFromDB(conn)
+    for i in range(1, 5):
+        count = i + 93
+        insertNewUnitToDB(conn, count, count, count, 'A-')
+        readFromDB(conn)
+    for i in range(1, 3):
+        count = i + 97
+        insertNewUnitToDB(conn, count, count, count, 'B-')
+        readFromDB(conn)
+    count = 100
+    insertNewUnitToDB(conn, count, count, count, 'AB-')
+    readFromDB(conn)
+
+
+def checkValidityOfBloodUnit():
+    """
+    this function check the Validity Of Blood Unit, if 30 days has pass
+    then it change the exit date to the current date and change the reason value.
+    this working at the background every 10 minutes.
+    """
+    print("checkValidityOfBloodUnit")
+    print(datetime.datetime.now())
+    global count
+    count1 = count + 1
+    for i in range(1, count1):
+        cursor = conn.cursor()
+        try:
+            print('check blood unit number ', i)
+            cursor.execute("select * from BECS.dbo.Blood_Unit WHERE [id] =?", (i))
+            for row in cursor:
+                current_time = datetime.datetime.now()
+                if row[4] < current_time + datetime.timedelta(days=-30):
+                    print('changing reason')
+                    updateBloodUnitInDB(conn, row[0], 'A blood dose has expired')
+                    id = str(row[0])
+                    msg = 'blood unit with id: ' + id + ' has expired'
+                    writeLog('blood unit expired', msg)
+        except Exception as e:
+            print(e)
+            break
+
+    root.after(2000 * 300, checkValidityOfBloodUnit)  # reschedule event in 10 minutes
+
+
+def createTable(screen):
+    """
+    this func show the current state of blood unit in DB how many units are available
+    :param screen:the current screen we wanna show the table
+    """
+    t = 0
+    for i in blood_dict.keys():
+        updatedict_Blood_dict(conn, i)
+    for i in blood_dict.keys():
+        b = tk.Label(screen, text=i)
+        b.grid(row=1, column=t)
+        c = tk.Label(screen, text=blood_dict[i])
+        c.grid(row=2, column=t)
+        t += 1
+
+
+def deleteBloodDB():
+    """
+    this func delete all the DB of blood unit Table
+    """
+    global count
+    c1 = count + 1
+    for i in range(0, c1):
+        deleteFromBloodUnitDB(conn, i)
+
+
+def deleteDB():
+    """
+    this func delete all the DB of users Table and blood unit
+    """
+    deleteBloodDB()
+    deleteUsersDB()
+
+
+def deleteUsersDB():
+    """
+    this func delete all the DB of users Table
+    """
+    global user_id
+    c1 = user_id + 1
+    for i in range(0, c1):
+        deleteFromUsersDB(conn, i)
+
+
+def deleteFromBloodUnitDB(conn, id):
+    """
+    this func get id and delete the blood unit that matches to the id in the DB
+    :param conn: connection string
+    :param id: blood unit id (serial number)
+    """
+    print('Delete From Blood Unit DB')
+    cursor = conn.cursor()
+    try:
+        cursor.execute('delete from BECS.dbo.Blood_Unit where id = ?', (id))
+        conn.commit()
+    except Exception as e:
+        print(e)
+
+
+def deleteFromUsersDB(conn, id):
+    """
+     this func get id and delete the user that matches to the id in the DB
+    :param conn: connection string
+    :param id: user id
+    """
+    print('Delete From Users DB')
+    cursor = conn.cursor()
+    try:
+        cursor.execute('delete from BECS.dbo.Bank_Users where id = ?', (id))
+        conn.commit()
+    except Exception as e:
+        print(e)
+
+
+def findOldestBloodUnit(conn, param):
+    """
+     this func search for the oldest blood unit in the DB
+    :param conn: connection string
+    :return: all data about the blood unit
+    """
+    print('Find Oldest Blood Unit')
+    cursor = conn.cursor()
+    cursor.execute('SELECT min(IDD),min(ed) '
+                   'FROM (SELECT id as IDD, [entry_date] as ed '
+                   'FROM BECS.dbo.Blood_Unit  '
+                   '        WHERE blood_type = ? AND reason is NULL) AS G', (param))
+    for row in cursor:
+        print(f'row={row}')
+    row in cursor
+    return row[0]
+
+
+def giveTakeBlood(screen, param, sign, id=None, frist_name=None, last_Name=None):
+    """
+    this func give\take blood and update it in the DB
+    :param screen: tk.Frame
+    :param param: blood type to give or take
+    :param sign: '+' - give blood, '-' - take blood
+    :param id: None by default, or id of donor
+    :param frist_name: None by default, or first name of donor
+    :param last_Name: None by default, or last name of donor
+    """
+    if sign == '-':
+        if blood_dict[param] == 0:
+            popupmsg(param)
+        else:
+            blood_dict[param] -= 1
+            unitId = findOldestBloodUnit(conn, param)
+            print('unit', unitId)
+            if unitId == None:
+                print("unit == None")
+            else:
+                bla = (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                str1 = 'unit was in use at ' + bla
+                print(str1)
+                updateBloodUnitInDB(conn, unitId, str1)
+                unitId1 = str(unitId)
+                print('unitId1', unitId1)
+                msg = 'Blood unit were in use, the blood unit id number: ' + unitId1 + ' the blood type is: ' + param
+                writeLog(msg)
+            print('param =', param)
+
+    elif id != None and frist_name != None and last_Name != None:
+        blood_dict[param] += 1
+        insertNewUnitToDB(conn, id, frist_name, last_Name, param)
+        msg = 'New blood unit added to the bank with id number: ' + id + ' the blood type is: ' + param
+        writeLog(msg)
+    elif id == None or frist_name == None or last_Name == None:
+        popupmsgbyorder('we got problem with donation', 'free text')
+
+    updatedict_Blood_dict(conn, param)
+    createTable(screen)
+
+
+def getBloodByOrder(screen, param, sign):
+    """
+    this func give\take blood by order of priority
+    :param screen: tk.Frame
+    :param param: blood type to give or take
+    :param sign: '+' - give blood, '-' - take blood
+    """
+    if param == 'O+':
+        if blood_dict[param] > 0:
+            giveTakeBlood(screen, param, sign)
+
+        elif blood_dict['O-'] > 0:
+            giveTakeBlood(screen, 'O-', '-')
+            popupmsgbyorder(param, 'O-')
+        else:
+            popupmsgbyorder(param, 'AAA')
+
+    elif param == 'A+':
+        if blood_dict[param] > 0:
+            giveTakeBlood(screen, param, '-')
+        elif blood_dict['A-'] > 0:
+            giveTakeBlood(screen, 'A-', '-')
+            popupmsgbyorder(param, 'A-')
+        elif blood_dict['O+'] > 0:
+            giveTakeBlood(screen, 'O+', '-')
+            popupmsgbyorder(param, 'O+')
+        elif blood_dict['O-'] > 0:
+            giveTakeBlood(screen, 'O-', '-')
+            popupmsgbyorder(param, 'O-')
+        else:
+            popupmsgbyorder(param, 'AAA')
+
+    elif param == 'B+':
+        if blood_dict[param] > 0:
+            giveTakeBlood(screen, param, '-')
+        elif blood_dict['B-'] > 0:
+            giveTakeBlood(screen, 'B-', '-')
+            popupmsgbyorder(param, 'B-')
+        elif blood_dict['O+'] > 0:
+            giveTakeBlood(screen, 'O+', '-')
+            popupmsgbyorder(param, 'O+')
+        elif blood_dict['O-'] > 0:
+            giveTakeBlood(screen, 'O-', '-')
+            popupmsgbyorder(param, 'O-')
+        else:
+            popupmsgbyorder(param, 'AAA')
+
+    elif param == 'AB+':
+        if blood_dict[param] > 0:
+            giveTakeBlood(screen, param, '-')
+        elif blood_dict['A+'] > 0:
+            giveTakeBlood(screen, 'A+', '-')
+            popupmsgbyorder(param, 'A+')
+        elif blood_dict['B+'] > 0:
+            giveTakeBlood(screen, 'B+', '-')
+            popupmsgbyorder(param, 'B+')
+        elif blood_dict['A-'] > 0:
+            giveTakeBlood(screen, 'A-', '-')
+            popupmsgbyorder(param, 'A-')
+        elif blood_dict['B-'] > 0:
+            giveTakeBlood(screen, 'B-', '-')
+            popupmsgbyorder(param, 'B-')
+        elif blood_dict['O+'] > 0:
+            giveTakeBlood(screen, 'O+', '-')
+            popupmsgbyorder(param, 'O+')
+        elif blood_dict['O-'] > 0:
+            giveTakeBlood(screen, 'O-', '-')
+            popupmsgbyorder(param, 'O-')
+        else:
+            popupmsgbyorder(param, 'AAA')
+
+    elif param == 'O-':
+        if blood_dict[param] > 0:
+            giveTakeBlood(screen, param, '-')
+        else:
+            popupmsgbyorder(param, 'AAA')
+
+    elif param == 'A-':
+        if blood_dict[param] > 0:
+            giveTakeBlood(screen, param, '-')
+        elif blood_dict['O-'] > 0:
+            giveTakeBlood(screen, 'O-', '-')
+            popupmsgbyorder(param, 'O-')
+        else:
+            popupmsgbyorder(param, 'AAA')
+
+    elif param == 'B-':
+        if blood_dict[param] > 0:
+            giveTakeBlood(screen, param, '-')
+        elif blood_dict['O-'] > 0:
+            giveTakeBlood(screen, 'O-', '-')
+            popupmsgbyorder(param, 'O-')
+        else:
+            popupmsgbyorder(param, 'AAA')
+
+    else:  # AB-
+        if blood_dict[param] > 0:
+            giveTakeBlood(screen, param, '-')
+        elif blood_dict['A-'] > 0:
+            giveTakeBlood(screen, 'A-', '-')
+            popupmsgbyorder(param, 'A-')
+        elif blood_dict['B-'] > 0:
+            giveTakeBlood(screen, 'B-', '-')
+            popupmsgbyorder(param, 'B-')
+        elif blood_dict['O-'] > 0:
+            giveTakeBlood(screen, 'O-', '-')
+            popupmsgbyorder(param, 'O-')
+        else:
+            popupmsgbyorder(param, 'AAA')
+
+    createTable(screen)
+
+
+def insertNewUserToDB(conn, Id, FName, LName, UserType, Password, bloodType=None):  # insert new user to DB
+    """
+    this function gets all data and insert it to the DB as a user.
+    :param conn: connection string
+    :param Id: the id to be insert
+    :param FName: the First name to be insert
+    :param LName: the Last name to be insert
+    :param UserType: the user type to be insert
+    :param Password: the password to be insert
+    :param bloodType: the blood type to be insert, None by default
+    :return: True if user added to DB else False
+    """
+    print('Insert New User To DB')
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "insert into BECS.dbo.Bank_Users(id,first_name,last_name,password,user_type,blood_type) values(?,?,?,?,?,?);",
+            (Id, FName, LName, Password, UserType, bloodType))
+        conn.commit()
+        msg = FName + ' ' + LName + ' with id number: ' + str(Id) + ' is a new user that added successfully to the bank'
+        writeLog(msg)
+        return True
+    except Exception as e:
+        print(' problem at 155')
+        print(e)
+
+
+def insertNewUnitToDB(conn, Id, FirstName, LastName, BloodType):  # insert new blood unit to DB
+    """
+    this function gets all data and insert it to the DB as a blood unit + current date.
+    :param conn: connection string
+    :param Id: the id to be insert
+    :param FirstName: the First name to be insert
+    :param LastName: the Last name to be insert
+    :param BloodType: the blood type to be insert
+    """
+    print('Insert New Unit To DB')
+    currentdatetime = datetime.datetime.now()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "insert into BECS.dbo.Blood_Unit(id,first_name,last_name,blood_type,entry_date) values(?,?,?,?,?);",
+            (Id, FirstName, LastName, BloodType, currentdatetime))
+        conn.commit()
+        msg = 'New blood unit with id number: ' + str(Id) + ' added successfully to the bank'
+        writeLog(msg)
+    except Exception as e:
+        print(e)
+
+
+def popupmsg(param):
+    """
+    this func get blood type as a param and pop up window message the there is no more blood of this type
+    :param param:
+    """
+    popup = tk.Tk()
+    popup.wm_title('!')
+    labal = tk.Label(popup, text='the bank run out of ' + param + ' blood')
+    labal.pack(side='top', fill='x', pady=10)
+    b1 = tk.Button(popup, text='Okay', command=popup.destroy)
+    b1.pack()
+    popup.mainloop()
+
+
+def popupmsgbyorder(param, givenblood):
+    """
+    this func pop up a window and tells the user if unit with other type was given or any different message
+    :param param: blood type that was spouse to be given
+    :param givenblood: actual blood type that was given
+    """
+    popup = tk.Tk()
+    popup.wm_title('!')
+    if givenblood == 'AAA':
+        labal = tk.Label(popup, text='the bank run out of ' + param + ' blood.')
+        labal.pack(side='top', fill='x', pady=10)
+        labal1 = tk.Label(popup, text='there is no blood that can be used for blood type ' + param)
+        labal1.pack(side='top', fill='x', pady=10)
+        b1 = tk.Button(popup, text='Okay', command=popup.destroy)
+        b1.pack()
+    elif givenblood == 'free text':
+        labal = tk.Label(popup, text=param)
+        labal.pack(side='top', fill='x', pady=10)
+        b1 = tk.Button(popup, text='Okay', command=popup.destroy)
+        b1.pack()
+    else:
+        labal = tk.Label(popup, text='the bank run out of ' + param + ' blood.')
+        labal.pack(side='top', fill='x', pady=10)
+        labal1 = tk.Label(popup, text='the bank gave ' + givenblood + ' blood.')
+        labal1.pack(side='top', fill='x', pady=10)
+        b1 = tk.Button(popup, text='Okay', command=popup.destroy)
+        b1.pack()
+    popup.mainloop()
+
+
+def readFromDB(conn):
+    """
+    this func reads all from DB, table blood_unit
+    :param conn: connection string
+    """
+    print('readFromDB')
+    cursor = conn.cursor()
+    cursor.execute("select * from BECS.dbo.Blood_Unit")
+    for row in cursor:
+        print(f'row={row}')
+
+
+def showMetaDatabyType(conn, param):
+    """
+    this func export any data of the DB by type, for users and for blood unit.
+    :param conn: connection string
+    :param param: the parameter to be export
+    """
+    cursor = conn.cursor()
+    global currentUser
+    userType = currentUser[4]
+    if userType == 'Admin':
+        if param == 'blood':
+            try:
+                print('Admin blood')
+                cursor.execute("select * from BECS.dbo.Blood_Unit")
+                row = [item for item in cursor.fetchall()]
+                column_names = [i[0] for i in cursor.description]
+                resultFyle = open("adminblood.csv", 'w')
+                writer = csv.writer(resultFyle)
+                writer.writerow(column_names)
+                resultFyle.write("\n")
+                for i in row:
+                    resultFyle.write(str(i) + "\n")
+                resultFyle.close()
+            except Exception as e:
+                print(e)
+        elif param == 'user':
+            try:
+                print('Admin user')
+                cursor.execute("select * from BECS.dbo.Bank_Users")
+                row = [item for item in cursor.fetchall()]
+                column_names = [i[0] for i in cursor.description]
+                resultFyle = open("adminusers.csv", 'w')
+                # Write data to csv file
+                writer = csv.writer(resultFyle)
+                writer.writerow(column_names)
+                for r in row:
+                    resultFyle.write(str(r) + "\n")
+                resultFyle.close()
+            except Exception as e:
+                print(e)
+
+
+def searchUserInDBbyId(conn, id):
+    """
+    this func search user by id
+    :param conn: connection string
+    :param id: the id to be search
+    :return: all data about the user if it exists
+    """
+    print('Search User In DB by ID')
+    cursor = conn.cursor()
+    try:
+        cursor.execute("select * from BECS.dbo.Bank_Users WHERE [id] =? ", (id))
+        for row in cursor:
+            print(f'row={row}')
+        row in cursor
+        return row
+    except:
+        # popupmsgbyorder('You insert worng details', 'free text')
+        print('user not found')
+
+
+def searchUserInDBbyIdAndPassword(conn, id, password):
+    """
+    this func search user by id and password if password matches to id
+    :param conn: connection string
+    :param id: the id to be search
+    :param password: string
+    :return: all data about the user
+    """
+    print('Search User In DB')
+    cursor = conn.cursor()
+    try:
+        cursor.execute("select * from BECS.dbo.Bank_Users WHERE [id] =? AND [password] = ?", (id, password))
+        for row in cursor:
+            print(f'row={row}')
+        row in cursor
+        return row
+    except:
+        popupmsgbyorder('You insert worng details', 'free text')
+
+
+def searchDonorInDB(conn, id):
+    """
+    this func search if donor is already exists
+    :param conn: connection string
+    :param id: the id to be search
+    :return: if donor is found return all data about the donor else False
+    """
+    print('Search Donor In DB')
+    cursor = conn.cursor()
+    try:
+        cursor.execute("select * from BECS.dbo.Bank_Users WHERE [id] =? ", (id))
+        for row in cursor:
+            print(f'row={row}')
+        row in cursor
+        return row  # Donor found
+    except:
+        return False  # Donor not found
+
+
+def searchBloodUnitInDBbyID(conn, id):
+    """
+    this func search blood unit by id
+    :param conn: connection string
+    :param id: the id to be search
+    :return: all data about the blood unit
+    """
+    print('Search Unit In DB by Id')
+    cursor = conn.cursor()
+    try:
+        cursor.execute("select * from BECS.dbo.Blood_Unit WHERE [id] =?  ", (id))
+        for row in cursor:
+            print(f'row={row}')
+        row in cursor
+        return row
+    except:
+        popupmsgbyorder('You insert worng details', 'free text')
+
+
+def updatedict_Blood_dict(conn, param):
+    """
+    this func updating the blood dict from the DB.
+    we are summing all blood unit from the same type that are not used or expired and
+    :param conn: connection string
+    :param param: the parameter to be update
+    :return:
+    """
+    # print(' Updating Blood_dict')
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "select sum(CASE WHEN [blood_type]=? AND [exit_date] is NULL THEN 1 ELSE 0 END) TotalXorD "
+            "from BECS.dbo.Blood_Unit ", (param))
+        for row in cursor:
+            blood_dict[param] = row[0]
+    except Exception as e:
+        print(e)
+
+
+def updateBloodUnitInDB(conn, Id, Reason):
+    """
+    this func 'delete' blood unit from DB adds datetime to bloodunit that where in use and the reason of use.
+    any blood unit that have exit time and reason considered as 'deleted'
+    :param conn:
+    :param BloodType: type of blood
+    :param Reason: string
+    """
+    print('updateBloodUnitInDB')
+    currentdatetime = datetime.datetime.now()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(""" UPDATE BECS.dbo.Blood_Unit
+                           SET exit_date=?, reason=?
+                           WHERE id=? """, (currentdatetime, Reason, Id))
+        conn.commit()
+        return searchBloodUnitInDBbyID(conn, Id)
+    except Exception as e:
+        print(e)
+    # readFromDB(conn)
+
+
+class BankBloodGUI(tk.Tk):
+
+    def __init__(self, *args, **kwargs):
+        tk.Tk.__init__(self, *args, **kwargs)
+        contianer = tk.Frame(self)
+
+        contianer.pack(side="top", fill="both", expand=True)
+
+        contianer.grid_rowconfigure(0, minsize=200, weight=1)
+        contianer.grid_columnconfigure(0, minsize=200, weight=1)
+
+        self.frames = {}
+
+        for F in (
+                EntryPage, DetailsOfDonor, ExsitsingUser, AddNewUser, AdminPage, OperatingRoom,
+                Multiple_Casualty_Incident, EmployPage, Research_StudentPage, MetaData,
+                DonateBlood):
+            frame = F(contianer, self)
+
+            self.frames[F] = frame
+
+            frame.grid(row=0, column=0, sticky="nsew")
+
+        self.show_frame(EntryPage)
+
+    def show_frame(self, cont):
+        frame = self.frames[cont]
+        if cont != EntryPage and cont != ExsitsingUser and cont != AddNewUser and cont != DetailsOfDonor:
+            createTable(frame)
+        frame.tkraise()
+
+
+class AdminPage(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        label = tk.Label(self, text="This is ADMIN page")
+        label.grid(row=0, column=0)
+
+        button1 = tk.Button(self, text="Operating Room", command=lambda: controller.show_frame(OperatingRoom))
+        button1.grid(row=3, column=1, sticky='s')
+        button2 = tk.Button(self, text="MCI", command=lambda: controller.show_frame(Multiple_Casualty_Incident))
+        button2.grid(row=3, column=2, sticky='s')
+        button3 = tk.Button(self, text="Donate", command=lambda: controller.show_frame(DetailsOfDonor))
+        button3.grid(row=3, column=3, sticky='s')
+        button4 = tk.Button(self, text="Add New User", command=lambda: controller.show_frame(AddNewUser))
+        button4.grid(row=3, column=4, sticky='s')
+        button4 = tk.Button(self, text="Show Data", command=lambda: controller.show_frame(MetaData))
+        button4.grid(row=3, column=5, sticky='s')
+        button5 = tk.Button(self, text="Log Out", command=lambda: backToHomeAndLogOut(controller))
+        button5.grid(row=4, column=1, sticky='s')
+        button6 = tk.Button(self, text="Build DB", command=lambda: buildDB())
+        button6.grid(row=4, column=2, sticky='s')
+        button7 = tk.Button(self, text="Delete DB", command=lambda: deleteDB())
+        button7.grid(row=4, column=3, sticky='s')
+
+
+class EmployPage(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        label = tk.Label(self, text="This is EMPLOY page")
+        label.grid(row=0, column=0)
+
+        button1 = tk.Button(self, text="Operating Room", command=lambda: controller.show_frame(OperatingRoom))
+        button1.grid(row=3, column=1, sticky='s')
+        button2 = tk.Button(self, text="MCI", command=lambda: controller.show_frame(Multiple_Casualty_Incident))
+        button2.grid(row=3, column=2, sticky='s')
+        button3 = tk.Button(self, text="Donate", command=lambda: controller.show_frame(DetailsOfDonor))
+        button3.grid(row=3, column=3, sticky='s')
+        button5 = tk.Button(self, text="Log Out", command=lambda: backToHomeAndLogOut(controller))
+        button5.grid(row=4, column=1, sticky='s')
+
+
+class Research_StudentPage(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+
+        label = tk.Label(self, text='This is RESEARCH STUDENT page')
+        label.grid(row=0, column=0)
+
+        button5 = tk.Button(self, text="Log Out", command=lambda: backToHomeAndLogOut(controller))
+        button5.grid(row=4, column=1, sticky='s')
+
+
+class MetaData(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+
+        label = tk.Label(self, text='This is META DATA page')
+        label.grid(row=0, column=0)
+
+        buttonUsers = tk.Button(self, text="Users Data",
+                                command=lambda: showMetaDatabyType(conn, 'user'))
+        buttonUsers.grid(row=4, column=0, sticky='s')
+        buttonBlood = tk.Button(self, text="Blood Data",
+                                command=lambda: showMetaDatabyType(conn, 'blood'))
+        buttonBlood.grid(row=4, column=1, sticky='s')
+
+        buttonBack = tk.Button(self, text="back", command=lambda: back(controller))
+        buttonBack.grid(row=5, column=0, sticky='s')
+        buttonLogOut = tk.Button(self, text="Log Out", command=lambda: backToHomeAndLogOut(controller))
+        buttonLogOut.grid(row=5, column=1, sticky='s')
+
+
+class DonateBlood(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        label = tk.Label(self, text="Donate Blood Page")
+        label.grid(row=0, column=0)
+
+        buttonOP = tk.Button(self, text="O+",
+                             command=lambda: giveTakeBlood(self, 'O+', '+'))
+        buttonOP.grid(row=3, column=0, sticky='ew', padx=10)
+        buttonAP = tk.Button(self, text="A+",
+                             command=lambda: giveTakeBlood(self, 'A+', '+'))
+        buttonAP.grid(row=3, column=1, sticky='ew', padx=10)
+        buttonBP = tk.Button(self, text="B+",
+                             command=lambda: giveTakeBlood(self, 'B+', '+'))
+        buttonBP.grid(row=3, column=2, sticky='ew', padx=10)
+        buttonABP = tk.Button(self, text="AB+",
+                              command=lambda: giveTakeBlood(self, 'AB+', '+'))
+        buttonABP.grid(row=3, column=3, sticky='ew', padx=10)
+        buttonOM = tk.Button(self, text="O-",
+                             command=lambda: giveTakeBlood(self, 'O-', '+'))
+        buttonOM.grid(row=3, column=4, sticky='ew', padx=10)
+        buttonAM = tk.Button(self, text="A-",
+                             command=lambda: giveTakeBlood(self, 'A-', '+'))
+        buttonAM.grid(row=3, column=5, sticky='ew', padx=10)
+        buttonBM = tk.Button(self, text="B-",
+                             command=lambda: giveTakeBlood(self, 'B-', '+'))
+        buttonBM.grid(row=3, column=6, sticky='ew', padx=10)
+        buttonABM = tk.Button(self, text="AB-",
+                              command=lambda: giveTakeBlood(self, 'AB-', '+'))
+        buttonABM.grid(row=3, column=7, sticky='ew', padx=10)
+
+        button = tk.Button(self, text="Home Page",
+                           command=lambda: controller.show_frame(EntryPage))
+        button.grid(row=4, column=1, sticky='s')
+        button2 = tk.Button(self, text="MCI",
+                            command=lambda: controller.show_frame(Multiple_Casualty_Incident))
+        button2.grid(row=4, column=2, sticky='s')
+
+
+class DetailsOfDonor(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        label = tk.Label(self, text="Details Of Donor")
+        label.grid(row=0, column=0)
+
+        def NewDoner(event):
+            print('NewDoner')
+            id = EID.get()
+            firstName = EfirstNameLabel.get()
+            lastName = ElastNameLabel.get()
+            bloodType = variable.get()
+
+            EID.delete(0, 'end')
+            EID.insert(0, "")
+            EfirstNameLabel.delete(0, 'end')
+            EfirstNameLabel.insert(0, "")
+            ElastNameLabel.delete(0, 'end')
+            ElastNameLabel.insert(0, "")
+
+            donor = searchDonorInDB(conn, id)
+            global count
+            if donor == False:
+
+                count += 1
+                print('count', count)
+                insertNewUserToDB(conn, id, firstName, lastName, 'donor', None, bloodType)
+                insertNewUnitToDB(conn, count, firstName, lastName, bloodType)
+                str = 'Hellow ' + firstName + ' ' + lastName + '\nid:' + id + '\nfor your ' + bloodType + ' donation, '
+                str += 'we added you to our bank \nWe hope to see you again!'
+                popupmsgbyorder(str, 'free text')
+
+            elif donor != False:
+
+                flag = True
+                if donor[1] != firstName:
+                    flag = False
+                elif donor[2] != lastName:
+                    flag = False
+                elif donor[5] != bloodType:
+                    flag = False
+                if flag == True:
+                    count += 1
+                    print('count', count)
+                    insertNewUnitToDB(conn, count, firstName, lastName, bloodType)
+                    str = 'Thank you ' + donor[1] + ' ' + donor[2] + ' for your ' + donor[5] + ' donor'
+                    popupmsgbyorder(str, 'free text')
+
+                else:
+                    popupmsgbyorder('you insert wrong details of donor please try again', 'free text')
+
+        IDLabel = tk.Label(self, text='Please enter doner ID')
+        IDLabel.grid(row=1, column=0)
+        EID = tk.Entry(self)
+        EID.grid(row=1, column=1)
+        firstNameLabel = tk.Label(self, text='Please enter first name')
+        firstNameLabel.grid(row=2, column=0)
+        EfirstNameLabel = tk.Entry(self)
+        EfirstNameLabel.grid(row=2, column=1)
+        lastNameLabel = tk.Label(self, text='Please enter last name')
+        lastNameLabel.grid(row=3, column=0)
+        ElastNameLabel = tk.Entry(self)
+        ElastNameLabel.grid(row=3, column=1)
+
+        blood_list = []
+        for key in blood_dict.keys():
+            blood_list.append(key)
+
+        bloodTypeLabel = tk.Label(self, text='Please choose blood type')
+        bloodTypeLabel.grid(row=4, column=0)
+
+        variable = tk.StringVar(self)
+        variable.set(blood_list[0])  # default value
+
+        blood_type_menu = tk.OptionMenu(self, variable, *blood_list)
+        blood_type_menu.grid(row=4, column=1)
+
+        buttonInsert = tk.Button(self, text="insert donor ",
+                                 command=lambda: NewDoner('<ButtonPress-1>'))
+        buttonInsert.grid(row=4, column=2, sticky='ew', padx=10)
+
+        buttonBack = tk.Button(self, text="back",
+                               command=lambda: back(controller))
+        buttonBack.grid(row=5, column=0, sticky='s')
+
+        buttonLogout = tk.Button(self, text="Log out",
+                                 command=lambda: backToHomeAndLogOut(controller))
+        buttonLogout.grid(row=5, column=1, sticky='s')
+
+
+class OperatingRoom(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        label = tk.Label(self, text="Operating Room Page")
+        label.grid(row=0, column=0)
+
+        buttonOP = tk.Button(self, text="O+",
+                             command=lambda: getBloodByOrder(self, 'O+', '-'))
+        buttonOP.grid(row=3, column=0, sticky='ew', padx=10)
+        buttonAP = tk.Button(self, text="A+",
+                             command=lambda: getBloodByOrder(self, 'A+', '-'))
+        buttonAP.grid(row=3, column=1, sticky='ew', padx=10)
+        buttonBP = tk.Button(self, text="B+",
+                             command=lambda: getBloodByOrder(self, 'B+', '-'))
+        buttonBP.grid(row=3, column=2, sticky='ew', padx=10)
+        buttonABP = tk.Button(self, text="AB+",
+                              command=lambda: getBloodByOrder(self, 'AB+', '-'))
+        buttonABP.grid(row=3, column=3, sticky='ew', padx=10)
+        buttonOM = tk.Button(self, text="O-",
+                             command=lambda: getBloodByOrder(self, 'O-', '-'))
+        buttonOM.grid(row=3, column=4, sticky='ew', padx=10)
+        buttonAM = tk.Button(self, text="A-",
+                             command=lambda: getBloodByOrder(self, 'A-', '-'))
+        buttonAM.grid(row=3, column=5, sticky='ew', padx=10)
+        buttonBM = tk.Button(self, text="B-",
+                             command=lambda: getBloodByOrder(self, 'B-', '-'))
+        buttonBM.grid(row=3, column=6, sticky='ew', padx=10)
+        buttonABM = tk.Button(self, text="AB-",
+                              command=lambda: getBloodByOrder(self, 'AB-', '-'))
+        buttonABM.grid(row=3, column=7, sticky='ew', padx=10)
+
+        buttonBack = tk.Button(self, text="back",
+                               command=lambda: back(controller))
+        buttonBack.grid(row=5, column=0, sticky='s')
+
+        buttonLogout = tk.Button(self, text="Log out",
+                                 command=lambda: backToHomeAndLogOut(controller))
+        buttonLogout.grid(row=5, column=1, sticky='s')
+
+
+class Multiple_Casualty_Incident(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        label = tk.Label(self, text="Multiple Casualty Incident Page")
+        label.grid(row=0, column=0)
+
+        buttonTakeBlood = tk.Button(self, text="Take Blood",
+                                    command=lambda: giveTakeBlood(self, 'O-', '-'))
+        buttonTakeBlood.grid(row=3, column=1, sticky='ew')
+
+        buttonBack = tk.Button(self, text="back",
+                               command=lambda: back(controller))
+        buttonBack.grid(row=5, column=0, sticky='es')
+
+        buttonLogout = tk.Button(self, text="Log out",
+                                 command=lambda: backToHomeAndLogOut(controller))
+        buttonLogout.grid(row=5, column=1, sticky='ws')
+
+
+class EntryPage(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        label = tk.Label(self, text="Please chose \nSign in or Sign up")
+        label.grid(row=0, column=0)
+
+        button1 = tk.Button(self, text="Sign in",
+                            command=lambda: controller.show_frame(ExsitsingUser))
+        button1.grid(row=3, column=1, sticky='s')
+
+
+class ExsitsingUser(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+
+        def UserEnter(event):
+            print('UserEnter')
+            id = EID.get()
+            password = EPassword.get()
+            EID.delete(0, 'end')
+            EID.insert(0, "")
+            EPassword.delete(0, 'end')
+            EPassword.insert(0, "")
+
+            global currentUser
+            currentUser = searchUserInDBbyIdAndPassword(conn, id, password)
+            if currentUser is None:
+                popupmsgbyorder("we have problem, the program will stop", 'free text')
+                exit(1)
+            else:
+                if currentUser[4] == 'Admin':
+                    print('Admin')
+                    writeLog('user enter')
+                    controller.show_frame(AdminPage)
+                elif currentUser[4] == 'Employ':
+                    print('Employ')
+                    writeLog('user enter')
+                    controller.show_frame(EmployPage)
+                elif currentUser[4] == 'Research student':
+                    print('Research student')
+                    writeLog('user enter')
+                    controller.show_frame(Research_StudentPage)
+
+        label = tk.Label(self, text="Please enter your detials")
+        label.grid(row=0, column=0)
+
+        IDLabel = tk.Label(self, text='Please enter your ID')
+        IDLabel.grid(row=1, column=0)
+        EID = tk.Entry(self)
+        EID.grid(row=1, column=1)
+        PasswordLabel = tk.Label(self, text='Please enter your Password')
+        PasswordLabel.grid(row=2, column=0)
+        EPassword = tk.Entry(self)
+        EPassword.grid(row=2, column=1)
+
+        buttonBackHome = tk.Button(self, text="back to Entry Page",
+                                   command=lambda: controller.show_frame(EntryPage))
+        buttonBackHome.grid(row=3, column=0, sticky='s')
+
+        buttonSingIn = tk.Button(self, text="Sing in",
+                                 command=lambda: UserEnter('<ButtonPress-1>'))
+        buttonSingIn.grid(row=3, column=1, sticky='s')
+
+
+class AddNewUser(tk.Frame):
+
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        labelTitle = tk.Label(self, text="Add New User", )
+        labelTitle.grid(row=0, column=0, sticky='s')
+
+        def NewUser(event):
+            eFName = entryFirstName.get()
+            eLName = entryLastName.get()
+            eID = entryID.get()
+            password = entryPassword.get()
+            bloodType = bloodVariable.get()
+            userType = userVariable.get()
+            if eFName.isalpha() and eLName.isalpha() and eID.isnumeric():
+                res = searchUserInDBbyId(conn, eID)
+                print('res', res)
+                if res == None:  # there is no object with the same id, so we can insert our data to the DB
+
+                    try:
+                        answer = insertNewUserToDB(conn, eID, eFName, eLName, userType, password, bloodType)
+
+                    except SystemError as e:
+                        if "Previous SQL was not a query." in str(e):
+                            pass
+                        else:
+                            raise e
+                    if answer == None:
+                        popupmsgbyorder("Problem to add new user,\nPlease try again", 'free text')
+                    else:
+                        str1 = 'Success ' + eFName + ' ' + eLName + ' with id ' + eID + ' added successfully to the system'
+                        popupmsgbyorder(str1, 'free text')
+
+                else:  # there is a object with the same id, so we can't insert our data to the DB
+                    print('your id already exsits, please enter your id')
+            else:
+                print('name must contain only character')
+
+        labelID = tk.Label(self, text='ID: ')
+        labelID.grid(row=1, column=0, sticky='s')
+        entryID = tk.Entry(self)
+        entryID.grid(row=1, column=1, sticky='s')
+        labelFirstName = tk.Label(self, text='First Name: ')
+        labelFirstName.grid(row=2, column=0, sticky='s')
+        entryFirstName = tk.Entry(self)
+        entryFirstName.grid(row=2, column=1, sticky='s')
+        labelLastName = tk.Label(self, text='Last Name: ')
+        labelLastName.grid(row=3, column=0, sticky='s')
+        entryLastName = tk.Entry(self)
+        entryLastName.grid(row=3, column=1, sticky='s')
+        labelPassword = tk.Label(self, text='Enter Password: ')
+        labelPassword.grid(row=4, column=0, sticky='s')
+        entryPassword = tk.Entry(self)
+        entryPassword.grid(row=4, column=1, sticky='s')
+
+        blood_list = []
+        for key in blood_dict.keys():
+            blood_list.append(key)
+
+        bloodTypeLabel = tk.Label(self, text='Please choose blood type')
+        bloodTypeLabel.grid(row=5, column=0)
+
+        bloodVariable = tk.StringVar(self)
+        bloodVariable.set(blood_list[0])  # default value
+
+        blood_type_menu = tk.OptionMenu(self, bloodVariable, *blood_list)
+        blood_type_menu.grid(row=5, column=1)
+
+        user_list = ['Admin', 'Employ', 'Research student']
+
+        bloodTypeLabel = tk.Label(self, text='Please choose user type')
+        bloodTypeLabel.grid(row=6, column=0)
+
+        userVariable = tk.StringVar(self)
+        userVariable.set(user_list[0])  # default value
+
+        user_type_menu = tk.OptionMenu(self, userVariable, *user_list)
+        user_type_menu.grid(row=6, column=1)
+
+        buttonBack = tk.Button(self, text="back",
+                               command=lambda: back(controller))
+        buttonBack.grid(row=7, column=0, sticky='s')
+
+        buttonLogout = tk.Button(self, text="Log out",
+                                 command=lambda: backToHomeAndLogOut(controller))
+        buttonLogout.grid(row=7, column=1, sticky='s')
+
+        buttonAddUser = tk.Button(self, text="Add User",
+                                  command=lambda: NewUser('<ButtonPress-1>'))
+        buttonAddUser.grid(row=6, column=4, sticky='s')
+
+
+root = BankBloodGUI()
+root.after(2000 * 300, checkValidityOfBloodUnit)
+root.mainloop()
